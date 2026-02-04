@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gayrimenkul Değer Artış Kazancı Vergisi Hesaplama</title>
+    <!-- Kütüphaneler -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .input-card { background: white; border-radius: 1.5rem; border: 1px solid #e2e8f0; }
+        .result-card { background: #ffffff; border-radius: 1.5rem; border: 1px solid #e2e8f0; overflow: hidden; }
+        .form-label { font-size: 0.875rem; font-weight: 600; color: #475569; margin-bottom: 0.5rem; display: block; }
+        .form-control { width: 100%; padding: 0.75rem 1rem; border: 1px solid #e2e8f0; border-radius: 0.75rem; outline: none; transition: all 0.2s; }
+        .form-control:focus { border-color: #0d9488; ring: 2px ring #0d9488; }
+        .result-item { display: flex; justify-content: space-between; padding: 0.75rem 0; border-bottom: 1px solid #f1f5f9; }
+        .result-item:last-child { border-bottom: none; }
+        
+        /* Sayı inputlarının yanındaki okları kaldırma */
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // KAPSAMLI VERİ SETİ (2015 - 2026 RESMİ VERİLER)
+        const DATA = {
+            ufe: {
+                "2014-12": 235.84, "2015-12": 249.31, "2016-12": 274.06, 
+                "2017-12": 316.48, "2018-12": 422.94, "2019-12": 454.08, 
+                "2020-12": 568.27, "2021-11": 858.43, "2021-12": 1022.25,
+                "2022-01": 1129.03, "2022-05": 1548.01, "2022-06": 1653.22, "2022-12": 2021.19,
+                "2023-01": 2105.02, "2023-11": 2881.04, "2023-12": 2915.02,
+                "2024-01": 3035.71, "2024-11": 3800.00, "2024-12": 3950.00,
+                "2025-11": 4747.63, "2025-12": 4850.00, 
+                "2026-01": 5012.45
+            },
+            exemptions: {
+                2015: 10600, 2016: 11000, 2017: 11000, 2018: 12000, 2019: 14800, 
+                2020: 18000, 2021: 19000, 2022: 25000, 2023: 55000, 2024: 87000, 
+                2025: 120000, 2026: 150000 // 332 Seri No.lu GVK Tebliği uyarınca 150.000 TL
+            },
+            // 2026 Yılı Gelir Vergisi Dilimleri (Ücret Dışı Gelirler İçin)
+            brackets: [
+                { limit: 190000, rate: 0.15 },
+                { limit: 400000, rate: 0.20 },
+                { limit: 1000000, rate: 0.27 },
+                { limit: 5300000, rate: 0.35 },
+                { limit: Infinity, rate: 0.40 }
+            ]
+        };
+
+        const App = () => {
+            const [inputs, setInputs] = useState({
+                purchaseDate: '2022-07-31',
+                saleDate: '2026-02-04',
+                purchasePrice: 1000000,
+                salePrice: 8500000,
+                expenses: 0,
+                method: 'bedel'
+            });
+
+            const [res, setRes] = useState(null);
+
+            // Sayıyı noktalı formata çevirme (Binlik Ayraç)
+            const formatNumber = (num) => {
+                if (num === null || num === undefined || isNaN(num)) return "";
+                return new Intl.NumberFormat('tr-TR').format(Math.round(num));
+            };
+
+            // Input içindeki noktalı metni sayıya çevirme
+            const parseNumber = (str) => {
+                if (!str) return 0;
+                return parseFloat(String(str).replace(/\./g, '').replace(/,/g, '.')) || 0;
+            };
+
+            const handlePriceChange = (field, val) => {
+                const numericValue = parseNumber(val);
+                setInputs(prev => ({ ...prev, [field]: numericValue }));
+            };
+
+            const getUfeValue = (dateStr) => {
+                const date = new Date(dateStr);
+                const year = date.getFullYear();
+                const month = date.getMonth(); 
+                let targetYear = year;
+                let targetMonth = month; 
+                if (targetMonth === 0) {
+                    targetYear--;
+                    targetMonth = 12;
+                }
+                const key = `${targetYear}-${String(targetMonth).padStart(2, '0')}`;
+                if (DATA.ufe[key]) return DATA.ufe[key];
+                const sortedKeys = Object.keys(DATA.ufe).sort();
+                const lastKey = sortedKeys[sortedKeys.length - 1];
+                return DATA.ufe[lastKey];
+            };
+
+            const calculate = () => {
+                const pDate = new Date(inputs.purchaseDate);
+                const sDate = new Date(inputs.saleDate);
+                const diffDays = (sDate - pDate) / (1000 * 60 * 60 * 24);
+
+                // 5 yıllık süre kontrolü (1826 gün) veya Miras/Bağış durumu
+                if (inputs.method === 'ivazsiz' || diffDays >= 1826) {
+                    setRes({ isExempt: true, reason: inputs.method === 'ivazsiz' ? "Miras veya Bağış" : "5 Yıllık Süre Dolumu" });
+                    return;
+                }
+
+                const ufeP = getUfeValue(inputs.purchaseDate);
+                const ufeS = getUfeValue(inputs.saleDate);
+                const ratio = (ufeS / ufeP) - 1;
+
+                let adjPurchase = inputs.purchasePrice;
+                // Mevzuat: Endeks artışı %10 ve üzerindeyse maliyet endekslemesi yapılır
+                if (ratio >= 0.10) {
+                    adjPurchase = inputs.purchasePrice * (ufeS / ufeP);
+                }
+
+                const profit = inputs.salePrice - adjPurchase;
+                const saleYear = sDate.getFullYear();
+                const exemption = DATA.exemptions[saleYear] || 150000;
+                
+                // Matrah = Kazanç - İstisna - Giderler
+                const matrah = Math.max(0, profit - exemption - inputs.expenses);
+                
+                let tax = 0;
+                let tempMatrah = matrah;
+                let prevLimit = 0;
+
+                for (const b of DATA.brackets) {
+                    const range = b.limit - prevLimit;
+                    const taxable = Math.min(tempMatrah, range);
+                    tax += taxable * b.rate;
+                    tempMatrah -= taxable;
+                    prevLimit = b.limit;
+                    if (tempMatrah <= 0) break;
+                }
+
+                const damga = 1190;
+                const totalTax = tax + damga;
+
+                setRes({
+                    isExempt: false,
+                    totalTax,
+                    ratio: ratio * 100,
+                    adjPurchase,
+                    profit,
+                    exemption,
+                    matrah,
+                    damga,
+                    rate: matrah > 0 ? (totalTax / matrah) * 100 : 0
+                });
+            };
+
+            useEffect(() => { calculate(); }, [inputs]);
+
+            const displayFormat = (v) => formatNumber(v) + " TL";
+
+            return (
+                <div className="max-w-6xl mx-auto px-4 py-8 md:py-16">
+                    <header className="text-center mb-12">
+                        {/* Emlaknomi Logo / Başlık Alanı */}
+                        <div className="flex justify-center mb-6">
+                            <div className="relative h-16 md:h-20 max-w-sm flex items-center justify-center">
+                                <img 
+                                    src="logo.png" 
+                                    alt="Emlaknomi" 
+                                    className="h-full object-contain"
+                                    onError={(e) => {
+                                        e.target.style.display = 'none';
+                                        e.target.nextSibling.style.display = 'block';
+                                    }}
+                                />
+                                <span style={{display: 'none'}} className="text-blue-600 text-4xl font-extrabold tracking-tight italic">Emlaknomi</span>
+                            </div>
+                        </div>
+
+                        <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 tracking-tight">Değer Artış Kazancı Hesaplama</h1>
+                        <p className="text-slate-500 mt-2 font-medium">Güncel Veri: Şubat 2026 (İstisna: 150.000 TL)</p>
+                    </header>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                        {/* GİRİŞ ALANI */}
+                        <div className="lg:col-span-5 input-card p-6 md:p-8 space-y-6 shadow-sm border-blue-50">
+                            <h2 className="text-lg font-bold flex items-center gap-2 border-b pb-4 text-blue-800">Hesaplama Bilgileri</h2>
+                            
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="form-label">Alış Tarihi</label>
+                                    <input type="date" className="form-control" value={inputs.purchaseDate} onChange={e => setInputs({...inputs, purchaseDate: e.target.value})} />
+                                </div>
+                                <div>
+                                    <label className="form-label">Satış Tarihi</label>
+                                    <input type="date" className="form-control" value={inputs.saleDate} onChange={e => setInputs({...inputs, saleDate: e.target.value})} />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="form-label">Alış Fiyatı (TL)</label>
+                                    <input 
+                                        type="text" 
+                                        className="form-control font-bold" 
+                                        value={formatNumber(inputs.purchasePrice)} 
+                                        onChange={e => handlePriceChange('purchasePrice', e.target.value)} 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="form-label">Satış Fiyatı (TL)</label>
+                                    <input 
+                                        type="text" 
+                                        className="form-control font-bold" 
+                                        value={formatNumber(inputs.salePrice)} 
+                                        onChange={e => handlePriceChange('salePrice', e.target.value)} 
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="form-label">Masraflar (Tapu vb.)</label>
+                                    <input 
+                                        type="text" 
+                                        className="form-control" 
+                                        value={formatNumber(inputs.expenses)} 
+                                        onChange={e => handlePriceChange('expenses', e.target.value)} 
+                                    />
+                                </div>
+                                <div>
+                                    <label className="form-label">Edinim Şekli</label>
+                                    <select className="form-control bg-white" value={inputs.method} onChange={e => setInputs({...inputs, method: e.target.value})}>
+                                        <option value="bedel">Satın Alma</option>
+                                        <option value="ivazsiz">Miras / Bağış</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button onClick={calculate} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-[0.98]">HESAPLA</button>
+                        </div>
+
+                        {/* SONUÇ ALANI */}
+                        <div className="lg:col-span-7">
+                            {res ? (
+                                res.isExempt ? (
+                                    <div className="result-card p-12 text-center flex flex-col items-center shadow-md">
+                                        <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center text-4xl mb-6">✓</div>
+                                        <h3 className="text-2xl font-black text-slate-800">Vergi Ödenmeyecek</h3>
+                                        <p className="text-slate-500 mt-2 font-medium max-w-sm">{res.reason} nedeniyle bu satış işlemi vergiden muaftır.</p>
+                                    </div>
+                                ) : (
+                                    <div className="result-card shadow-xl border-blue-100 border-2">
+                                        <div className="bg-slate-900 p-8 text-white">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-slate-400 font-bold text-sm uppercase tracking-widest">Ödenecek Toplam Vergi</span>
+                                                <span className="bg-blue-500 text-[10px] px-2 py-1 rounded font-black uppercase">2026 Mevzuatı</span>
+                                            </div>
+                                            <h3 className="text-4xl font-black mt-2 tracking-tight text-blue-400">{displayFormat(res.totalTax)}</h3>
+                                        </div>
+                                        
+                                        <div className="p-8 space-y-1 bg-white">
+                                            <div className="result-item">
+                                                <span className="text-slate-600">Endeks Artış Oranı:</span>
+                                                <span className="font-semibold text-slate-900">% {res.ratio.toLocaleString('tr-TR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}</span>
+                                            </div>
+                                            <div className="result-item">
+                                                <span className="text-slate-600">Enflasyon Düzeltmeli Maliyet:</span>
+                                                <span className="font-bold text-slate-900">{displayFormat(res.adjPurchase)}</span>
+                                            </div>
+                                            <div className="result-item">
+                                                <span className="text-slate-600">Safi Kazanç:</span>
+                                                <span className="font-semibold text-slate-900">{displayFormat(res.profit)}</span>
+                                            </div>
+                                            <div className="result-item">
+                                                <span className="text-slate-600">Yıllık İstisna ({new Date(inputs.saleDate).getFullYear()}):</span>
+                                                <span className="font-bold text-red-500">-{displayFormat(res.exemption)}</span>
+                                            </div>
+                                            <div className="result-item bg-blue-50 px-4 -mx-4 rounded-lg my-2 py-4 border border-blue-100">
+                                                <span className="text-blue-900 font-black">Vergi Matrahı:</span>
+                                                <span className="text-blue-700 font-black text-xl">{displayFormat(res.matrah)}</span>
+                                            </div>
+                                            <div className="result-item">
+                                                <span className="text-slate-600">Damga Vergisi:</span>
+                                                <span className="font-medium text-slate-900">{displayFormat(res.damga)}</span>
+                                            </div>
+                                            <div className="result-item pt-4">
+                                                <span className="text-slate-400 text-xs italic">* 332 Seri No.lu Gelir Vergisi Genel Tebliği (150.000 TL İstisna) ve 2026 gelir vergisi tarifesi kullanılmıştır.</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )
+                            ) : null}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
